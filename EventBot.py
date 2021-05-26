@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import asyncio
 import typing
@@ -42,7 +42,7 @@ class BotConfig:
         """
         Header for next event brief announcement
         """
-        self.heading_id: int = 843812338239012884
+        self.heading_id: int = 847163122657656892
 
         """
         Voice channel where players is put after the end of game
@@ -126,6 +126,23 @@ class BotConfig:
         """
         return self.bot.get_channel(self.announce_id)
 
+    async def get_next_announce(self):
+        """
+        Get next event (by date)
+        :param ctx: Command context
+        :return: The Event Message
+        """
+        first_event = None
+
+        async for message in self.announce.history():
+            event = EventMessage(self, message)
+            if event.date is None:
+                continue
+            if first_event is None or event.date < first_event.date:
+                first_event = event
+
+        return first_event
+
     @property
     def heading(self) -> discord.VoiceChannel:
         """
@@ -198,6 +215,14 @@ class BotConfig:
         return cls._config_cache[guild_id]
 
     @classmethod
+    def get_all(cls) -> typing.Iterable['BotConfig']:
+        """
+        Get all guild configs
+        :return:
+        """
+        return cls._config_cache.values()
+
+    @classmethod
     def load_file(cls, file: str) -> str:
         """
         Load cache from configuration file
@@ -245,13 +270,12 @@ class BotConfig:
             config.write(fp)
 
 
-async def reset_game(ctx: commands.Context) -> None:
+async def reset_game(config: BotConfig) -> None:
     """
     Reset get board
-    :param ctx: a Discord Context
+    :param config: a Bot Configuration
     :return:
     """
-    config = BotConfig.from_context(ctx)
     print("Reset channel {}".format(config.temp_channel.name))
     await config.temp_channel.delete_messages(await config.temp_channel.history().flatten())
     await config.temp_channel.send("Ce salon est automatiquement effacé à la fin de la journée. Il sert à partager les liens des tables.\nBon jeu !")
@@ -297,19 +321,21 @@ class EventMessage:
     """
     Class for parsing a announce and get an event
     """
-    def __init__(self, message: discord.Message = None):
+    def __init__(self, config: BotConfig, message: discord.Message = None):
         """
         Parse a message and get event data
         :param message: A discord message to parse as an event
         """
         import re
 
-        self.id = None
         self.date = None
+        self.close_date = None
+        self.open_date = None
         self.name = "Soirée jeux"
         self.games_masters = []
         self.players = None
         self.message = message
+        self.config = config
 
         if message is not None:
             self.id = message.id
@@ -325,8 +351,42 @@ class EventMessage:
                 minutes = int(date_element.group(4))
                 year = now.year + 1 if now.month > month else now.year
                 self.date = datetime(year=year, month=month, day=day, hour=hour, minute=minutes)
+                self.close_date = self.date + timedelta(hours=4)
+                self.open_date = self.date - timedelta(hours=1)
 
             self.games_masters = re.findall('<@([^>]*)>', message.content)
+
+    @property
+    def is_open(self) -> bool:
+        """
+        Is the event open ?
+        :return:
+        """
+        return self.config.reactions_cog.message is not None \
+               and self.config.reactions_cog.message.id == self.message.id
+
+    async def open(self) -> None:
+        """
+        Open this event
+        :return:
+        """
+        await self.config.reactions_cog.set_message(self.message)
+
+    @property
+    def can_close(self) -> bool:
+        """
+        Is this event expired ?
+        :return:
+        """
+        return datetime.now() > self.close_date
+
+    @property
+    def can_open(self) -> bool:
+        """
+        Can this event be opened ?
+        :return:
+        """
+        return self.open_date < datetime.now() < self.close_date
 
 
 async def get_announces(ctx: commands.Context) -> typing.Sequence[EventMessage]:
@@ -339,29 +399,10 @@ async def get_announces(ctx: commands.Context) -> typing.Sequence[EventMessage]:
     events = []
 
     async for message in conf.announce.history():
-        event = EventMessage(message)
+        event = EventMessage(conf, message)
         if event.date is not None:
             events.append(event)
     return events
-
-
-async def get_next_announce(ctx: commands.Context) -> EventMessage:
-    """
-    Get next event (by date)
-    :param ctx: Command context
-    :return: The Event Message
-    """
-    first_event = None
-    conf = BotConfig.from_context(ctx)
-
-    async for message in conf.announce.history():
-        event = EventMessage(message)
-        if event.date is None:
-            continue
-        if first_event is None or event.date < first_event.date:
-            first_event = event
-
-    return first_event
 
 
 class DateNotAvailable(BaseException):
@@ -512,7 +553,7 @@ class GameMasterHelper(commands.Cog, name='Maitre du jeu'):
         if channel.name == new_name:
             return
 
-        await channel.edit(name=new_name)
+        await channel.edit(name=new_name, reason="Channel edited by Game Master {}.".format(ctx.author.display_name))
 
     @commands.command(
         brief='Ajoute un autre maitre du jeu'
@@ -568,7 +609,7 @@ class EventManagement(commands.Cog, name='Plannification'):
         conf = BotConfig.from_context(ctx)
 
         async for message in conf.announce.history():
-            event = EventMessage(message)
+            event = EventMessage(conf, message)
             all_events.append([
                 event.id,
                 event.date.strftime("%d/%m - %H:%M") if event.date is not None else "-",
@@ -601,7 +642,7 @@ class EventManagement(commands.Cog, name='Plannification'):
             end = dt_value + timedelta(hours=4)
 
             async for announce in conf.announce.history():
-                event = EventMessage(announce)
+                event = EventMessage(conf, announce)
                 if event.date is None:
                     continue
                 print(event.date)
@@ -680,7 +721,7 @@ class EventManagement(commands.Cog, name='Plannification'):
         """
         conf = BotConfig.from_context(ctx)
         message = await conf.announce.fetch_message(event_id)
-        event = EventMessage(message)
+        event = EventMessage(conf, message)
         if event.date is None:
             print("DELETE: Event sans date")
             raise commands.CheckFailure(message="Event without date.")
@@ -708,6 +749,10 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
     """
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.update_task.start()
+
+    def cog_unload(self):
+        self.update_task.cancel()
 
     @commands.command(
         name='open',
@@ -777,31 +822,70 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
         :param ctx: Context
         :return:
         """
-        (event, tasks) = await self.update(ctx)
+        conf = BotConfig.from_context(ctx)
+        event, tasks = await self.update(conf)
         if event is None:
             tasks.append(ctx.send("Pas de soirée à venir"))
+        elif event.is_open:
+            tasks.append(ctx.send("Prochaine soirée le {}. L'événement est ouvert. Fermeture {}.".format(
+                event.date.strftime("%d/%m à %H:%M"),
+                event.close_date.strftime("%d/%m à %H:%M")
+            )))
         else:
-            tasks.append(ctx.send("Prochaine soirée le {}.".format(event.date.strftime("%d/%m à %H:%M"))))
+            tasks.append(ctx.send("Prochaine soirée le {}. L'événement n'est pas encore ouvert. Ouverture {}.".format(
+                event.date.strftime("%d/%m à %H:%M"),
+                event.open_date.strftime("%d/%m à %H:%M")
+            )))
 
         await asyncio.gather(*tasks)
 
+    @tasks.loop(minutes=1)
+    async def update_task(self):
+        """
+        Task to automate open and close events
+        :return:
+        """
+        await asyncio.gather(*[self.update(conf) for conf in BotConfig.get_all()])
+
+    @update_task.before_loop
+    async def before_update_task(self):
+        """
+        Wait for bot ready before start update loop
+        :return:
+        """
+        await self.bot.wait_until_ready()
+        print("start loop")
+
     @staticmethod
-    async def update(ctx: commands.Context) -> typing.Tuple[EventMessage, typing.List[typing.Coroutine]]:
+    async def update(conf: BotConfig) -> typing.Tuple[EventMessage, typing.List[typing.Coroutine]]:
         """
         Update and monitor the next event.
         :param ctx: Context
         :return:
         """
-        conf = BotConfig.from_context(ctx)
-        next_event = await get_next_announce(ctx)
+        next_event = await conf.get_next_announce()
         tasks = []
-        print("Current Name: {}".format(conf.heading.name))
-        tasks.append(conf.reactions_cog.set_message(next_event.message))
+        heading = conf.heading.name
 
         if next_event is None:
-            tasks.append(conf.heading.edit(name="Pas de soirée à venir"))
+            heading = "Pas de soirée à venir"
+            tasks.append(conf.reactions_cog.set_message(None))
+
+        elif next_event.can_close and next_event.is_open:
+            print("Close event")
+            tasks.append(reset_game(conf))
+
+        elif next_event.can_open and not next_event.is_open:
+            tasks.append(conf.reactions_cog.set_message(next_event.message))
+            heading = "📅Event en cours"
+            print("Open event")
+
         else:
-            tasks.append(conf.heading.edit(name=next_event.date.strftime("📅Soirée %d/%m à %H:%M")))
+            heading = next_event.date.strftime("📅Soirée %d/%m à %H:%M")
+
+        if heading != conf.heading.name:
+            print("Current Name: {}\nNext Name: {}".format(conf.heading.name, heading))
+            tasks.append(conf.heading.edit(name=heading, reason="Bot update next event."))
 
         return next_event, tasks
 
@@ -994,7 +1078,7 @@ def bot_factory() -> commands.Bot:
         if ctx.channel.id != conf.temp_channel_id:
             await ctx.send("Vous devez faire cette commande dans le salon #infos")
         else:
-            await reset_game(ctx)
+            await reset_game(conf)
 
     @reset.error
     async def reset_error(ctx, error) -> None:
