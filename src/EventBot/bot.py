@@ -1,14 +1,18 @@
 from discord.ext import commands
-import functools
 from .config import BotConfig
 import discord
 
 
 class GameContext(commands.Context):
+    def __init__(self, *args, **kwargs):
+        super(GameContext, self).__init__(*args, **kwargs)
+        self._config = None
 
-    @functools.cached_property
+    @property
     def config(self) -> BotConfig:
-        return BotConfig.from_context(self)
+        if self._config is None:
+            self._config = BotConfig.from_context(self)
+        return self._config
 
     @property
     def player_role(self) -> discord.Role:
@@ -151,6 +155,12 @@ def bot_factory() -> commands.Bot:
         :param crt: Context
         :return:
         """
+        try:
+            from pip import main
+            main(['install', '--upgrade', 'git+https://github.com/bontiv/event-discord-bot.git#egg=DiscordEventBot'])
+        except ImportError:
+            pass
+
         for extension in list(bot.extensions.keys()):
             bot.reload_extension(extension)
 
