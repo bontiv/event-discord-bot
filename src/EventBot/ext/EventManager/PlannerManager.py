@@ -67,7 +67,7 @@ class EventManagementCog(commands.Cog, name='Plannification'):
                     raise DateNotAvailable(dt_value, event)
 
             await ctx.send("Ajout d'un event le {}: {}".format(dt_value, name))
-            await conf.announce.send(
+            message = await conf.announce.send(
                 """
                 **{name}**
                 Événement prévu le {date} !
@@ -78,6 +78,7 @@ class EventManagementCog(commands.Cog, name='Plannification'):
                     gm=ctx.author.id,
                     date=dt_value.strftime("%d/%m à %H h %M")
                 ))
+            await message.add_reaction("✅")
 
         except DateNotAvailable as e:
             await ctx.send("Oups ! On ne peux pas réserver à 4h d'une réservation existante. Il y a une résa le {}.".format(
