@@ -44,6 +44,7 @@ def config_run(cfg):
 
     file = join(dirs.user_config_dir, "config.ini")
     makedirs(dirs.user_config_dir, exist_ok=True)
+    client_secret = None
     if exists(file):
         client_secret = BotConfig.load_file(file)
 
