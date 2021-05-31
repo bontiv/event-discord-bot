@@ -164,4 +164,11 @@ def bot_factory() -> commands.Bot:
         for extension in list(bot.extensions.keys()):
             bot.reload_extension(extension)
 
+    @bot.command(
+        brief='Affiche la version'
+    )
+    async def version(ctx: commands.Context):
+        from . import VERSION
+        await ctx.send("Version: {}".format(VERSION))
+
     return bot
