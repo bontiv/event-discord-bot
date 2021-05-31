@@ -5,6 +5,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import asyncio
 import typing
+import functools
 
 
 class BotConfig:
@@ -270,6 +271,42 @@ class BotConfig:
             config.write(fp)
 
 
+class GameContext(commands.Context):
+
+    @functools.cached_property
+    def config(self) -> BotConfig:
+        return BotConfig.from_context(self)
+
+    @property
+    def player_role(self) -> discord.Role:
+        return self.config.player_role
+
+    @property
+    def gm_role(self) -> discord.Role:
+        return self.config.gm_role
+
+    @property
+    def temp_channel(self) -> discord.TextChannel:
+        return self.config.temp_channel
+
+    @property
+    def announce(self) -> discord.TextChannel:
+        return self.config.announce
+
+    @property
+    def reactions(self) -> 'ReactionManager':
+        return self.config.reactions_cog
+
+    @property
+    def admin(self) -> 'BotManagement':
+        return self.config.admin_cog
+
+
+class GameBot(commands.Bot):
+    async def get_context(self, message, *, cls=GameContext):
+        return await super().get_context(message, cls=cls)
+
+
 async def reset_game(config: BotConfig) -> None:
     """
     Reset get board
@@ -287,9 +324,10 @@ async def reset_game(config: BotConfig) -> None:
             print("Disconnect {}".format(member))
             tasks.append(member.move_to(None))
 
-    for member in config.player_role.members:
-        print("Remove {} from {}".format(config.player_role, member))
-        tasks.append(member.remove_roles(config.player_role))
+    for role in [config.player_role, config.gm_role]:
+        for member in role.members:
+            print("Remove {} from {}".format(role, member))
+            tasks.append(member.remove_roles(role))
 
     if config.reactions_cog is not None and config.reactions_cog.message is not None:
         tasks.append(config.reactions_cog.message.delete())
@@ -436,9 +474,17 @@ class GameMasterHelper(commands.Cog, name='Maitre du jeu'):
         conf = BotConfig.from_context(ctx)
 
         import random
+        max_dice = 0
+        message = []
+        win_player = None
+        for user in conf.player_role.members:
+            dice = random.randint(1, max_value)
+            if dice > max_dice:
+                max_dice = dice
+                win_player = user
+            message.append("{} lance les dés et fait {} !".format(user.display_name, dice))
         await ctx.send(
-            "\n".join(["{} lance les dés et fait {} !".format(user.display_name, random.randint(1, max_value))
-                       for user in conf.player_role.members])
+            "\n".join(message) + "\n\nLe gagnant est <@{}> avec son dé de {} !".format(win_player.id, max_dice)
         )
 
     @commands.command(
@@ -464,34 +510,45 @@ class GameMasterHelper(commands.Cog, name='Maitre du jeu'):
         brief='Fait deux équipes avec les joueurs',
         description='Take all players and put them into two teams. The blue and the red team.'
     )
-    async def random_cmd(self, crx: commands.Context) -> None:
+    async def random_cmd(self, crx: commands.Context, put_vocal: bool = False) -> None:
         """
         Display all players in two teams
         :param crx: Context
+        :param put_vocal: Put players in differents vocals channels
         :return:
         """
         conf = BotConfig.from_context(crx)
-        names = []
+        players = []
 
         if len(conf.player_role.members) == 0:
             await crx.send("Oups ! Pas assez de monde pour faire des équipes...")
             return
 
         for member in conf.player_role.members:
-            names.append(member.display_name)
+            players.append(member)
 
         import random
-        random.shuffle(names)
+        random.shuffle(players)
 
-        middle = int(len(names) / 2)
-        await crx.send("**Team Rouge**\n```\n  - {}\n```\n\n**Team Bleu**\n```\n  - {}\n```".format(
-            "\n  - ".join(names[:middle]),
-            "\n  - ".join(names[middle:])
+        middle = int(len(players) / 2)
+        def getname(user):
+            return user.display_name
+
+        await crx.send("**🔴 Team Rouge 🔴**\n```\n  - {}\n```\n\n**🔵 Team Bleu 🔵**\n```\n  - {}\n```".format(
+            "\n  - ".join(map(getname, players[:middle])),
+            "\n  - ".join(map(getname, players[middle:]))
         ))
 
-    @commands.command(
-        brief='Réparti les joueurs dans les deux salons vocaux'
-    )
+        if put_vocal:
+            chan1 = conf.voice_channel(1)
+            chan2 = conf.voice_channel(2)
+
+            for player in players[middle:]:
+                tasks.append(player.move_to(chan1))
+
+            for player in players[:middle]:
+                tasks.append(player.move_to(chan2))
+
     async def randomteam(self, ctx: commands.Context) -> None:
         """
         Put player into two voices channels
@@ -555,18 +612,55 @@ class GameMasterHelper(commands.Cog, name='Maitre du jeu'):
 
         await channel.edit(name=new_name, reason="Channel edited by Game Master {}.".format(ctx.author.display_name))
 
-    @commands.command(
-        brief='Ajoute un autre maitre du jeu'
+    @commands.group(
+        brief='Gère les maitres du jeu'
     )
-    async def gm(self, ctx, user: discord.Member) -> None:
+    async def gm(self, ctx) -> None:
         """
-        Add Game Master role to Player
+        Manage Games Masters
         :param ctx: Context
-        :param user: User
+        :return:
+        """
+        pass
+
+    @gm.command(
+        name='add',
+        brief='Ajoute un GM'
+    )
+    async def add_gm(self, ctx, user: discord.Member):
+        """
+        Add a Game Master
+        :param ctx: Context
+        :param user: User to add
         :return:
         """
         conf = BotConfig.from_context(ctx)
         await user.add_roles(conf.gm_role)
+
+    @gm.command(
+        name='remove',
+        brief='Retire un GM'
+    )
+    async def remove_gm(self, ctx, user: discord.Member):
+        """
+        Remove a Game Master
+        :param ctx: Context
+        :param user: User to remove
+        :return:
+        """
+        conf = BotConfig.from_context(ctx)
+        await user.remove_roles(conf.gm_role)
+
+    @commands.command(
+        name='close',
+        brief='Ferme la zone de jeu.'
+    )
+    async def close_cmd(self, ctx: commands.Context):
+        conf = BotConfig.from_context(ctx)
+        if ctx.channel.id != conf.temp_channel_id:
+            await ctx.send("Vous devez faire cette commande dans le salon #infos")
+        else:
+            await reset_game(conf)
 
     async def cog_check(self, ctx: commands.Context) -> bool:
         """
@@ -574,19 +668,15 @@ class GameMasterHelper(commands.Cog, name='Maitre du jeu'):
         :param ctx: Discord Context
         :return:
         """
-        try:
-            if ctx.guild is None:
-                return False
-            if ctx.author.id == 364004307550601218:
-                return True
-
-            conf = BotConfig.from_context(ctx)
-
-            check = commands.check_any(commands.has_role(conf.gm_role))
-            await check.predicate(ctx)
-            return True
-        except (commands.CheckFailure, commands.CheckAnyFailure):
+        if ctx.guild is None:
             return False
+        if ctx.author.id == 364004307550601218:
+            return True
+
+        conf = BotConfig.from_context(ctx)
+        if conf.gm_role in ctx.author.roles:
+            return True
+        return False
 
 
 class EventManagement(commands.Cog, name='Plannification'):
@@ -845,7 +935,11 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
         Task to automate open and close events
         :return:
         """
-        await asyncio.gather(*[self.update(conf) for conf in BotConfig.get_all()])
+        tasks_all = []
+        for conf in BotConfig.get_all():
+            event, tasks = await self.update(conf)
+            tasks_all += tasks
+        await asyncio.gather(*tasks_all)
 
     @update_task.before_loop
     async def before_update_task(self):
@@ -854,7 +948,6 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
         :return:
         """
         await self.bot.wait_until_ready()
-        print("start loop")
 
     @staticmethod
     async def update(conf: BotConfig) -> typing.Tuple[EventMessage, typing.List[typing.Coroutine]]:
@@ -868,7 +961,7 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
         heading = conf.heading.name
 
         if next_event is None:
-            heading = "Pas de soirée à venir"
+            heading = "📅Pas de soirée à venir"
             tasks.append(conf.reactions_cog.set_message(None))
 
         elif next_event.can_close and next_event.is_open:
@@ -877,11 +970,19 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
 
         elif next_event.can_open and not next_event.is_open:
             tasks.append(conf.reactions_cog.set_message(next_event.message))
-            heading = "📅Event en cours"
+            for gm in next_event.games_masters:
+                member = conf.guild.get_member(gm)
+                if member is None:
+                    member = await conf.guild.fetch_member(gm)
+                if member is not None:
+                    tasks.append(member.add_roles(conf.gm_role))
             print("Open event")
 
-        else:
-            heading = next_event.date.strftime("📅Soirée %d/%m à %H:%M")
+        if next_event is not None:
+            if next_event.date > datetime.now():
+                heading = next_event.date.strftime("📅Soirée %d/%m à %H:%M")
+            else:
+                heading = next_event.date.strftime("📅Événement en cours")
 
         if heading != conf.heading.name:
             print("Current Name: {}\nNext Name: {}".format(conf.heading.name, heading))
@@ -897,13 +998,7 @@ class BotManagement(commands.Cog, description='Gestion du bot (commande admins)'
         """
         if ctx.guild is None:
             return False
-        if ctx.author.id == 364004307550601218:
-            return True
-        try:
-            commands.has_guild_permissions(administrator=True).predicate(ctx)
-            return True
-        except (commands.CheckFailure, commands.CheckAnyFailure):
-            return False
+        return ctx.author.guild_permissions.administrator
 
 
 class ReactionManager(commands.Cog, name='reactions'):
@@ -974,12 +1069,12 @@ class ReactionManager(commands.Cog, name='reactions'):
         """
         self.message = message
         self.banlist.clear()
-        conf = BotConfig.from_guild_id(self.bot, message.guild.id)
 
         tasks = []
         players = []
 
         if self.message is not None:
+            conf = BotConfig.from_guild_id(self.bot, message.guild.id)
             tasks.append(message.add_reaction("✅"))
 
             for reaction in self.message.reactions:
@@ -992,15 +1087,15 @@ class ReactionManager(commands.Cog, name='reactions'):
                     async for user in reaction.users():
                         tasks.append(self.message.remove_reaction(reaction.emoji, user))
 
-        for player in conf.player_role.members:
-            if player.id not in players:
-                tasks.append(player.remove_roles(conf.player_role))
+            for player in conf.player_role.members:
+                if player.id not in players:
+                    tasks.append(player.remove_roles(conf.player_role))
 
         await asyncio.gather(*tasks)
 
 
 def bot_factory() -> commands.Bot:
-    bot = commands.Bot(
+    bot = GameBot(
         command_prefix='.',
         intents=BotConfig.intents,
         description='Le bot qui aide pour organiser des soirées jeux !',
@@ -1055,6 +1150,8 @@ def bot_factory() -> commands.Bot:
             ))
         elif isinstance(error, commands.MissingPermissions):
             await ctx.send("Oups ! Permission refusé pour {}...".format(ctx.command))
+        elif isinstance(error, commands.MemberNotFound):
+            await ctx.send("Oups ! Je n'ai pas trouvé cet utilisateur...")
         elif isinstance(error, commands.CommandNotFound):
             await ctx.send("Oups ! La commande `{}` n'existe pas...".format(ctx.command))
         elif isinstance(error, commands.CheckFailure):
@@ -1064,34 +1161,6 @@ def bot_factory() -> commands.Bot:
             print(error)
             import traceback
             traceback.print_exception(type(error), error, error.__traceback__)
-
-    @bot.command()
-    @commands.check_any(commands.has_guild_permissions(administrator=True), commands.has_role(844127068479422514))
-    async def reset(ctx: commands.Context) -> None:
-        """
-        Command to close the game board.
-        May be moved in the GameMaster Cog in future version.
-        :param ctx: Context
-        :return:
-        """
-        conf = BotConfig.from_context(ctx)
-        if ctx.channel.id != conf.temp_channel_id:
-            await ctx.send("Vous devez faire cette commande dans le salon #infos")
-        else:
-            await reset_game(conf)
-
-    @reset.error
-    async def reset_error(ctx, error) -> None:
-        """
-        Error handler for reset command
-        :param ctx: Context
-        :param error: Raised error
-        :return:
-        """
-        if isinstance(error, commands.CheckFailure):
-            await ctx.send("Oups ! Tu ne peux pas faire cette commande...")
-        else:
-            raise error
 
     @bot.command(
         brief='Lance un dé',
