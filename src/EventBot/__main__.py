@@ -67,7 +67,8 @@ def main_run():
 
     args = argparse.ArgumentParser()
     commands = args.add_subparsers(title='Commands', dest='command')
-    run = commands.add_parser('run')
+    commands.add_parser('run')
+    commands.add_parser('upgrade')
     config = commands.add_parser('config')
     sub_config = config.add_subparsers(title='configuration', dest='config')
     show_config = sub_config.add_parser('show')
@@ -82,6 +83,10 @@ def main_run():
 
     if cfg.command == 'config':
         config_run(cfg)
+
+    if cfg.command == 'upgrade':
+        from pip import main
+        main(['install', '--upgrade', 'git+https://github.com/bontiv/event-discord-bot.git#egg=DiscordEventBot'])
 
 if __name__ == '__main__':
     main_run()
