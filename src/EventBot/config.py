@@ -76,7 +76,7 @@ class BotConfig:
     """
     Bot client ID
     """
-    client_id: typing.ClassVar[str]
+    client_id: typing.ClassVar[str] = None
 
     """
     Configuration cache
