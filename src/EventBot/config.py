@@ -234,7 +234,7 @@ class BotConfig:
             pass
 
         cls.client_id = config['DEFAULT']['client']
-        return config['DEFAULT']['secret']
+        return config['DEFAULT']['secret'] if 'secret' in config['DEFAULT'] else None
 
     @classmethod
     def save_file(cls, file: str):
