@@ -3,7 +3,7 @@ from .config import BotConfig
 import discord
 
 
-def main_run():
+def bot_run():
     """
     Main class to execute the Bot
     :return:
@@ -32,7 +32,55 @@ def main_run():
         bot.run(BotConfig.load_file(file))
     else:
         print("Configuration missing !")
+        print("Path: {}".format(file))
 
+
+def config_run(cfg):
+    from os.path import exists, join
+    from os import makedirs
+    from appdirs import AppDirs
+
+    dirs = AppDirs(appname='EventDiscordBot', appauthor='Bontiv', roaming=True)
+
+    file = join(dirs.user_config_dir, "config.ini")
+    makedirs(dirs.user_config_dir, exist_ok=True)
+    if exists(file):
+        client_secret = BotConfig.load_file(file)
+
+    if cfg.config == 'show':
+        print("ClientID: {}".format(BotConfig.client_id))
+        print("Secret: {}".format(client_secret))
+
+    if cfg.config == 'set':
+        import configparser
+        config = configparser.ConfigParser()
+        config.read(file)
+        config['DEFAULT'][cfg.parameter] = cfg.value
+        with open(file, 'w') as fp:
+            config.write(fp)
+
+def main_run():
+    import argparse
+
+    default_parameters = ['client', 'secret']
+
+    args = argparse.ArgumentParser()
+    commands = args.add_subparsers(title='Commands', dest='command')
+    run = commands.add_parser('run')
+    config = commands.add_parser('config')
+    sub_config = config.add_subparsers(title='configuration', dest='config')
+    show_config = sub_config.add_parser('show')
+    show_config.add_argument('-p', '--parameter', choices=default_parameters)
+    set_config = sub_config.add_parser('set')
+    set_config.add_argument('parameter', choices=default_parameters)
+    set_config.add_argument('value')
+
+    cfg = args.parse_args()
+    if cfg.command == 'run':
+        bot_run()
+
+    if cfg.command == 'config':
+        config_run(cfg)
 
 if __name__ == '__main__':
     main_run()
