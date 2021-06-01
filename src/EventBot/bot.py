@@ -43,6 +43,17 @@ class GameBot(commands.Bot):
     async def get_context(self, message, *, cls=GameContext):
         return await super().get_context(message, cls=cls)
 
+    def version(self):
+        from . import VERSION
+
+        versions = dict({'CORE': VERSION})
+
+        for ext_name, extention in self.extensions.items():
+            if 'VERSION' in dir(extention):
+                print(extention.VERSION)
+                versions[ext_name] = extention.VERSION
+
+        return versions
 
 class HelpCommand(commands.DefaultHelpCommand):
     """
@@ -63,7 +74,7 @@ class HelpCommand(commands.DefaultHelpCommand):
         return "Utilisez .help commande pour plus d'information sur une commande.\nVous pouvez aussi utiliser .help catégorie pour plus d'informations sur une catégorie."
 
 
-def bot_factory() -> commands.Bot:
+def bot_factory() -> GameBot:
     bot = GameBot(
         command_prefix='.',
         intents=BotConfig.intents,
@@ -165,10 +176,10 @@ def bot_factory() -> commands.Bot:
             bot.reload_extension(extension)
 
     @bot.command(
+        name='version',
         brief='Affiche la version'
     )
-    async def version(ctx: commands.Context):
-        from . import VERSION
-        await ctx.send("Version: {}".format(VERSION))
+    async def version_cmd(ctx: commands.Context):
+        await ctx.send("```\n" + tabulate.tabulate(bot.version().items(), headers=['Component', 'Version']) + "```")
 
     return bot

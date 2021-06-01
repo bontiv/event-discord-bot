@@ -69,6 +69,7 @@ def main_run():
     commands = args.add_subparsers(title='Commands', dest='command')
     commands.add_parser('run')
     commands.add_parser('upgrade')
+    commands.add_parser('version')
     config = commands.add_parser('config')
     sub_config = config.add_subparsers(title='configuration', dest='config')
     show_config = sub_config.add_parser('show')
@@ -83,6 +84,11 @@ def main_run():
 
     if cfg.command == 'config':
         config_run(cfg)
+
+    if cfg.command == 'version':
+        import tabulate
+        bot = bot_factory()
+        print(tabulate.tabulate(bot.version().items(), headers=['Component', 'Version']))
 
     if cfg.command == 'upgrade':
         from pip import main

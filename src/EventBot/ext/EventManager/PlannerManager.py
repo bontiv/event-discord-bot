@@ -66,7 +66,7 @@ class EventManagementCog(commands.Cog, name='Plannification'):
                 if begin < event.date < end:
                     raise DateNotAvailable(dt_value, event)
 
-            await ctx.send("Ajout d'un event le {}: {}".format(dt_value, name))
+            await ctx.send("Ajout d'un event le {}: {}".format(dt_value.strftime("%d/%m à %H h %M"), name))
             message = await conf.announce.send(
                 """
                 **{name}**

@@ -5,7 +5,7 @@ from .BotAdministration import BotManagementCog
 from discord.ext.commands import Bot
 
 __requires__ = ['EventBot']
-
+VERSION = "1.0.0"
 
 def setup(bot: Bot):
     """

@@ -153,7 +153,13 @@ class BotManagementCog(commands.Cog, description='Gestion du bot (commande admin
 
         if next_event is not None:
             if next_event.date > datetime.now():
-                heading = next_event.date.strftime("📅Soirée %d/%m à %H:%M")
+                diff_dates = next_event.date - datetime.now()
+                if diff_dates.days == 0:
+                    heading = next_event.date.strftime("📅Aujourd'hui à %H:%M")
+                elif diff_dates.days == 1:
+                    heading = next_event.date.strftime("📅Demain à %H:%M")
+                else:
+                    heading = next_event.date.strftime("📅Soirée %d/%m à %H:%M")
             else:
                 heading = next_event.date.strftime("📅Événement en cours")
 
