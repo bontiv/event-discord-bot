@@ -1,3 +1,5 @@
+import datetime
+
 from EventBot.config import BotConfig
 from EventBot.objects import EventMessage
 import asyncio
@@ -12,7 +14,14 @@ async def reset_game(config: BotConfig) -> None:
     :return:
     """
     print("Reset channel {}".format(config.temp_channel.name))
-    await config.temp_channel.delete_messages(await config.temp_channel.history().flatten())
+
+    after = datetime.datetime.now()
+    after -= datetime.timedelta(days=13)
+
+    await config.temp_channel.delete_messages(await config.temp_channel.history(after=after).flatten())
+
+    async for message in config.temp_channel.history():
+        await message.delete()
     await config.temp_channel.send("Ce salon est automatiquement effacé à la fin de la journée. Il sert à partager les liens des tables.\nBon jeu !")
 
     tasks = []

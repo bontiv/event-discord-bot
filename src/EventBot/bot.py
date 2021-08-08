@@ -180,6 +180,6 @@ def bot_factory() -> GameBot:
         brief='Affiche la version'
     )
     async def version_cmd(ctx: commands.Context):
-        await ctx.send("```\n" + tabulate.tabulate(bot.version().items(), headers=['Component', 'Version']) + "```")
+        await ctx.send("```\n" + tabulate.tabulate(ctx.bot.version().items(), headers=['Component', 'Version']) + "```")
 
     return bot
