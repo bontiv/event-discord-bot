@@ -102,7 +102,7 @@ class BotManagementCog(commands.Cog, description='Gestion du bot (commande admin
 
         await asyncio.gather(*tasks)
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(minutes=10)
     async def update_task(self):
         """
         Task to automate open and close events
@@ -112,7 +112,7 @@ class BotManagementCog(commands.Cog, description='Gestion du bot (commande admin
         for conf in BotConfig.get_all():
             event, tasks = await self.update(conf)
             tasks_all += tasks
-        await asyncio.gather(*tasks_all)
+        await asyncio.gather(*tasks_all, return_exceptions=True)
 
     @update_task.before_loop
     async def before_update_task(self):
